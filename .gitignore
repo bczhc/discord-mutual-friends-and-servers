@@ -51,3 +51,9 @@ venv.bak/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+/.idea/
+discord-mutual-friends-and-servers.iml
+/output/
+/untitled/
+/untitled1/

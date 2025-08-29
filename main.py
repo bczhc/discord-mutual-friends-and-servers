@@ -5,11 +5,37 @@ import os
 from time import sleep
 import sys
 import asyncio
+import base64
+import datetime
 
 import discord
 from dotenv import load_dotenv
 from get_token import get_token
 
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+
+def colored_log(msg):
+    print(bcolors.OKCYAN + msg + bcolors.ENDC)
+
+def load_names_from_jsonl(path: str):
+    """读取 jsonl 文件并返回所有 name 的列表"""
+    names = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            obj = json.loads(line)
+            if "name" in obj:
+                names.append(obj["name"])
+    return names
 
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -264,6 +290,7 @@ class MyClient(discord.Client):
             print(f"guild_server_members: {len(guild_server_members)}")
             print(f"chunked_server_members: {len(chunked_server_members)}")
 
+            print(server_members)
             server_member_count = len(server_members)
             if server_member_count > max_members:
                 logging.info(
@@ -273,6 +300,9 @@ class MyClient(discord.Client):
             selected_server_member_count = min(server_member_count, max_members)
 
             server_info[server_name] = dict()
+
+            fetched_member_names = load_names_from_jsonl('output/out.jsonl')
+            colored_log("Count of already fetched members: " + str(len(fetched_member_names)))
 
             for start_idx in range(0, selected_server_member_count, period_max_members):
                 end_idx = min(
@@ -294,28 +324,43 @@ class MyClient(discord.Client):
 
                     member_name = f"{member.name}#{member.discriminator}"
 
-                    if member_name in seen_members:
-                        server_info[server_name][member_name] = dict()
-                        server_info[server_name][member_name]["is_friend"] = (
-                            seen_members[member_name]["is_friend"]
-                        )
-                        server_info[server_name][member_name]["mutual_friends"] = (
-                            seen_members[member_name]["mutual_friends"]
-                        )
-
-                        server_info[server_name][member_name]["mutual_servers"] = (
-                            seen_members[member_name]["mutual_servers"]
-                        )
+                    if member.name in fetched_member_names:
+                        colored_log('Skipped member: ' + member.name)
                         continue
-                    else:
-                        seen_members[member_name] = dict()
 
                     try:
+                        colored_log('Fetching member: '+ member_name)
                         member_profile = await server.fetch_member_profile(
                             member.id,
                             with_mutual_guilds=True,
                             with_mutual_friends=True,
                         )
+
+                        def extract_mutual_guild(mutual_guild):
+                            guild = mutual_guild.guild
+                            return {
+                                'id': mutual_guild.id,
+                                'nick': mutual_guild.nick,
+                                'guild': {
+                                    'name': guild.name,
+                                    'description': guild.description,
+                                }
+                            }
+
+                        json_obj = {
+                            'name': member_profile.name,
+                            'displayName': member_profile.display_name,
+                            'globalName': member_profile.global_name,
+                            'id': member_profile.id,
+                            'legacyUsername': member_profile.legacy_username,
+                            'nick': member_profile.nick,
+                            'bio': member_profile.bio,
+                            'mutualGuilds': list(map(extract_mutual_guild, member_profile.mutual_guilds)),
+                        }
+                        dumped = json.dumps(json_obj)
+                        print(dumped)
+                        with open("output/out.jsonl", "a") as myfile:
+                            myfile.write(dumped + "\n")
                     except (discord.errors.NotFound, discord.errors.InvalidData):
                         logging.warning(
                             f"Member {member_name} not found or invalid. Skipping."
@@ -331,39 +376,6 @@ class MyClient(discord.Client):
                             f"Unexpected error fetching profile for {member_name}: {e}."
                         )
                         continue
-
-                    server_info[server_name][member_name] = dict()
-
-                    mutual_friend_names = []
-                    mutual_server_names = []
-                    mutual_friends = member_profile.mutual_friends
-                    mutual_servers = member_profile.mutual_guilds
-
-                    if member.id in friend_ids:
-                        server_info[server_name][member_name]["is_friend"] = True
-                        seen_members[member_name]["is_friend"] = True
-                    else:
-                        server_info[server_name][member_name]["is_friend"] = False
-                        seen_members[member_name]["is_friend"] = False
-
-                    for friend in mutual_friends:
-                        friend_name = f"{friend.name}#{friend.discriminator}"
-                        mutual_friend_names.append(friend_name)
-
-                    server_info[server_name][member_name]["mutual_friends"] = (
-                        mutual_friend_names
-                    )
-                    seen_members[member_name]["mutual_friends"] = mutual_friend_names
-
-                    for mutual_server in mutual_servers:
-                        if mutual_server.id != server.id:
-                            mutual_server_names.append(mutual_server.guild.name)
-
-                    server_info[server_name][member_name]["mutual_servers"] = (
-                        mutual_server_names
-                    )
-
-                    seen_members[member_name]["mutual_servers"] = mutual_server_names
 
                     await asyncio.sleep(sleep_time)
 
