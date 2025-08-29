@@ -303,84 +303,91 @@ class MyClient(discord.Client):
 
             fetched_member_names = load_names_from_jsonl('output/out.jsonl')
             colored_log("Count of already fetched members: " + str(len(fetched_member_names)))
+            colored_log('Count of server members: ' + str(server_member_count))
 
-            for start_idx in range(0, selected_server_member_count, period_max_members):
-                end_idx = min(
-                    start_idx + period_max_members, selected_server_member_count
-                )
-                for member_idx in range(start_idx, end_idx):
-                    member = server_members[member_idx]
+            long_pause_counter = 0
 
-                    if include_servers:
-                        logging.info(
-                            f"Processing {server.name} server, progress = {specific_server_count}/{len(include_servers)} servers {member_idx + 1}/{selected_server_member_count} members"
-                        )
-                    else:
-                        logging.info(
-                            f"Processing {server.name} server, progress = {server_idx + 1}/{servers_count} servers {member_idx + 1}/{selected_server_member_count} members"
-                        )
-                    if member.id == client.user.id:
-                        continue
+            for member_idx in range(0, server_member_count):
+                if long_pause_counter >= 100:
+                    long_pause_counter = 0
+                    logging.info(f"Pausing for {pause_duration} seconds...")
+                    await asyncio.sleep(pause_duration)
 
-                    member_name = f"{member.name}#{member.discriminator}"
 
-                    if member.name in fetched_member_names:
-                        colored_log('Skipped member: ' + member.name)
-                        continue
+                member = server_members[member_idx]
 
-                    try:
-                        colored_log('Fetching member: '+ member_name)
-                        member_profile = await server.fetch_member_profile(
-                            member.id,
-                            with_mutual_guilds=True,
-                            with_mutual_friends=True,
-                        )
+                if include_servers:
+                    logging.info(
+                        f"Processing {server.name} server, progress = {specific_server_count}/{len(include_servers)} servers {member_idx + 1}/{selected_server_member_count} members"
+                    )
+                else:
+                    logging.info(
+                        f"Processing {server.name} server, progress = {server_idx + 1}/{servers_count} servers {member_idx + 1}/{selected_server_member_count} members"
+                    )
+                if member.id == client.user.id:
+                    continue
 
-                        def extract_mutual_guild(mutual_guild):
-                            guild = mutual_guild.guild
-                            return {
-                                'id': mutual_guild.id,
-                                'nick': mutual_guild.nick,
-                                'guild': {
-                                    'name': guild.name,
-                                    'description': guild.description,
-                                }
+                member_name = f"{member.name}#{member.discriminator}"
+
+                if member.name in fetched_member_names:
+                    colored_log('Skipped member: ' + member.name)
+                    continue
+
+                try:
+                    colored_log('Fetching member: '+ member_name)
+                    long_pause_counter += 1
+                    member_profile = await server.fetch_member_profile(
+                        member.id,
+                        with_mutual_guilds=True,
+                        with_mutual_friends=True,
+                    )
+
+                    def extract_mutual_guild(mutual_guild):
+                        guild = mutual_guild.guild
+                        return {
+                            'id': mutual_guild.id,
+                            'nick': mutual_guild.nick,
+                            'guild': {
+                                'name': guild.name,
+                                'description': guild.description,
                             }
-
-                        json_obj = {
-                            'name': member_profile.name,
-                            'displayName': member_profile.display_name,
-                            'globalName': member_profile.global_name,
-                            'id': member_profile.id,
-                            'legacyUsername': member_profile.legacy_username,
-                            'nick': member_profile.nick,
-                            'bio': member_profile.bio,
-                            'mutualGuilds': list(map(extract_mutual_guild, member_profile.mutual_guilds)),
                         }
-                        dumped = json.dumps(json_obj)
-                        print(dumped)
-                        with open("output/out.jsonl", "a") as myfile:
-                            myfile.write(dumped + "\n")
-                    except (discord.errors.NotFound, discord.errors.InvalidData):
-                        logging.warning(
-                            f"Member {member_name} not found or invalid. Skipping."
-                        )
-                        continue
-                    except discord.errors.HTTPException as e:
-                        logging.warning(
-                            f"HTTP error fetching profile for {member_name}: {e}. Skipping."
-                        )
-                        continue
-                    except Exception as e:
-                        logging.error(
-                            f"Unexpected error fetching profile for {member_name}: {e}."
-                        )
-                        continue
 
-                    await asyncio.sleep(sleep_time)
+                    json_obj = {
+                        'name': member_profile.name,
+                        'displayName': member_profile.display_name,
+                        'globalName': member_profile.global_name,
+                        'id': member_profile.id,
+                        'legacyUsername': member_profile.legacy_username,
+                        'nick': member_profile.nick,
+                        'bio': member_profile.bio,
+                        'mutualGuilds': list(map(extract_mutual_guild, member_profile.mutual_guilds)),
+                    }
+                    dumped = json.dumps(json_obj)
+                    print(dumped)
+                    with open("output/out.jsonl", "a") as myfile:
+                        myfile.write(dumped + "\n")
+                except (discord.errors.NotFound, discord.errors.InvalidData):
+                    logging.warning(
+                        f"Member {member_name} not found or invalid. Skipping."
+                    )
+                    continue
+                except discord.errors.HTTPException as e:
+                    logging.warning(
+                        f"HTTP error fetching profile for {member_name}: {e}. Skipping."
+                    )
+                    continue
+                except Exception as e:
+                    logging.error(
+                        f"Unexpected error fetching profile for {member_name}: {e}."
+                    )
+                    continue
 
-                logging.info(f"Pausing for {pause_duration} seconds...")
-                await asyncio.sleep(pause_duration)
+                await asyncio.sleep(sleep_time)
+
+            colored_log('Done')
+            exit(0)
+
 
         unmatched_servers = include_servers.difference(matched_servers)
         if unmatched_servers:
