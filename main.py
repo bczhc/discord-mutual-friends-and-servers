@@ -23,11 +23,15 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
+RETRY_COUNT = 5
 
 def colored_log(msg):
     print(bcolors.OKCYAN + msg + bcolors.ENDC)
 
 def load_names_from_jsonl(path: str):
+    if not os.path.exists(path):
+        return []
+
     """读取 jsonl 文件并返回所有 name 的列表"""
     names = []
     with open(path, "r", encoding="utf-8") as f:
@@ -307,6 +311,47 @@ class MyClient(discord.Client):
 
             long_pause_counter = 0
 
+            async def fetch_member_info(_member_id, _member_name):
+                await asyncio.sleep(sleep_time)
+                try:
+                    colored_log('Fetching member: ' + _member_name)
+                    member_profile = await server.fetch_member_profile(
+                        _member_id,
+                        with_mutual_guilds=True,
+                        with_mutual_friends=True,
+                    )
+                    return [0, member_profile]
+                except (discord.errors.NotFound, discord.errors.InvalidData):
+                    logging.warning(
+                        f"Member {_member_name} not found or invalid. Skipping."
+                    )
+                    return [1, None]
+                except discord.errors.HTTPException as e:
+                    logging.warning(
+                        f"HTTP error fetching profile for {_member_name}: {e}. Skipping."
+                    )
+                    return [2, None]
+                except Exception as e:
+                    logging.error(
+                        f"Unexpected error fetching profile for {_member_name}: {e}."
+                    )
+                    return [3, None]
+
+            async def fetch_member_info_retry(_member_id, _member_name):
+                counter = 0
+                while True:
+                    counter += 1
+                    result = await fetch_member_info(_member_id, _member_name)
+                    code = result[0]
+                    if code == 0 or code == 1:
+                        return result[1]
+
+                    # enter into the retry
+                    if counter >= RETRY_COUNT:
+                        logging.info('Gave up retrying.')
+                        return None
+                    logging.info('Retrying...')
+
             for member_idx in range(0, server_member_count):
                 if long_pause_counter >= 100:
                     long_pause_counter = 0
@@ -333,57 +378,38 @@ class MyClient(discord.Client):
                     colored_log('Skipped member: ' + member.name)
                     continue
 
-                try:
-                    colored_log('Fetching member: '+ member_name)
-                    long_pause_counter += 1
-                    member_profile = await server.fetch_member_profile(
-                        member.id,
-                        with_mutual_guilds=True,
-                        with_mutual_friends=True,
-                    )
+                member_profile = await fetch_member_info_retry(member.id, member_name)
+                long_pause_counter += 1
 
-                    def extract_mutual_guild(mutual_guild):
-                        guild = mutual_guild.guild
-                        return {
-                            'id': mutual_guild.id,
-                            'nick': mutual_guild.nick,
-                            'guild': {
-                                'name': guild.name,
-                                'description': guild.description,
-                            }
+                if member_profile is None:
+                    colored_log('Request failed for member: ' + member_name + ', skipping.')
+                    continue
+
+                def extract_mutual_guild(mutual_guild):
+                    guild = mutual_guild.guild
+                    return {
+                        'id': mutual_guild.id,
+                        'nick': mutual_guild.nick,
+                        'guild': {
+                            'name': guild.name,
+                            'description': guild.description,
                         }
-
-                    json_obj = {
-                        'name': member_profile.name,
-                        'displayName': member_profile.display_name,
-                        'globalName': member_profile.global_name,
-                        'id': member_profile.id,
-                        'legacyUsername': member_profile.legacy_username,
-                        'nick': member_profile.nick,
-                        'bio': member_profile.bio,
-                        'mutualGuilds': list(map(extract_mutual_guild, member_profile.mutual_guilds)),
                     }
-                    dumped = json.dumps(json_obj)
-                    print(dumped)
-                    with open("output/out.jsonl", "a") as myfile:
-                        myfile.write(dumped + "\n")
-                except (discord.errors.NotFound, discord.errors.InvalidData):
-                    logging.warning(
-                        f"Member {member_name} not found or invalid. Skipping."
-                    )
-                    continue
-                except discord.errors.HTTPException as e:
-                    logging.warning(
-                        f"HTTP error fetching profile for {member_name}: {e}. Skipping."
-                    )
-                    continue
-                except Exception as e:
-                    logging.error(
-                        f"Unexpected error fetching profile for {member_name}: {e}."
-                    )
-                    continue
 
-                await asyncio.sleep(sleep_time)
+                json_obj = {
+                    'name': member_profile.name,
+                    'displayName': member_profile.display_name,
+                    'globalName': member_profile.global_name,
+                    'id': member_profile.id,
+                    'legacyUsername': member_profile.legacy_username,
+                    'nick': member_profile.nick,
+                    'bio': member_profile.bio,
+                    'mutualGuilds': list(map(extract_mutual_guild, member_profile.mutual_guilds)),
+                }
+                dumped = json.dumps(json_obj)
+                print(dumped)
+                with open("output/out.jsonl", "a") as myfile:
+                    myfile.write(dumped + "\n")
 
             colored_log('Done')
             exit(0)
