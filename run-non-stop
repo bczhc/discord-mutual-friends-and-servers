@@ -1,0 +1,13 @@
+#!/bin/zsh
+
+#server='HF Underground'
+#server='Rust Programming Language Community'
+#server='r/Palworld'
+#server='Deno'
+#server='Wplace_CN'
+server='Pocketpair - Craftopia, Palworld'
+
+while :; do
+  python3 main.py -j True -i $server
+  sleep 120
+done

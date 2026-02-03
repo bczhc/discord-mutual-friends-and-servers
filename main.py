@@ -23,7 +23,8 @@ class bcolors:
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
 
-RETRY_COUNT = 5
+RETRY_COUNT = 20
+RETRY_DELAY = 2 * 60
 
 def colored_log(msg):
     print(bcolors.OKCYAN + msg + bcolors.ENDC)
@@ -351,6 +352,7 @@ class MyClient(discord.Client):
                         logging.info('Gave up retrying.')
                         return None
                     logging.info('Retrying...')
+                    await asyncio.sleep(RETRY_DELAY)
 
             for member_idx in range(0, server_member_count):
                 if long_pause_counter >= 100:
